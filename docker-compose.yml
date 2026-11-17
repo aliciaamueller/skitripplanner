@@ -1,6 +1,6 @@
 # Whole system locally: docker compose up --build
-# Initial structure: the two domain services, one container each.
-# SQL Server, the database init job and the static UI are added next.
+# The two domain services, one container each, and the UI in front.
+# Open http://localhost:8080. SQL Server and the database init job are added next.
 services:
   trip-management:
     build: ./services/trip-management
@@ -18,3 +18,14 @@ services:
       - "8002:8000"
     depends_on:
       - trip-management
+
+  ui:
+    build: ./services/UI
+    environment:
+      TRIPS_URL: http://trip-management:8000
+      ROOMS_URL: http://room-allocation:8000
+    ports:
+      - "8080:8080"
+    depends_on:
+      - trip-management
+      - room-allocation
