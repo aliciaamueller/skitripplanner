@@ -1,10 +1,13 @@
-"""Statistics for the Ski Club dashboard."""
+"""Registration statistics for the Ski Club dashboard."""
 
 from db import get_connection
 
 
 def get_trip_statistics(trip_id):
-    """Calculate registration and room statistics for one trip.
+    """Calculate registration statistics for one trip.
+
+    Room counts are not here: rooms live in the Room Allocation service,
+    so the UI combines these numbers with that service's room summary.
 
     Read-only: an unpaid reservation past its deadline is still counted
     until the next registration change for the trip releases it.
@@ -45,19 +48,6 @@ def get_trip_statistics(trip_id):
             (trip_id,)
         ).fetchone()[0]
 
-        assigned = conn.execute(
-            """
-            SELECT COUNT(*)
-            FROM room_assignments AS a
-            JOIN registrations AS r ON a.registration_id = r.id
-            JOIN rooms AS room ON a.room_id = room.id
-            WHERE r.trip_id = ?
-              AND room.trip_id = ?
-              AND r.status = 'confirmed'
-            """,
-            (trip_id, trip_id)
-        ).fetchone()[0]
-
         capacity = trip["capacity"]
         taken = confirmed + pending
 
@@ -67,8 +57,6 @@ def get_trip_statistics(trip_id):
             "pending_payment": pending,
             "waitlisted": waitlisted,
             "places_remaining": max(0, capacity - taken),
-            "room_assigned": assigned,
-            "need_room": max(0, confirmed - assigned),
             "occupancy_percent": round(taken / capacity * 100, 1)
         }
 

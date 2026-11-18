@@ -1,4 +1,4 @@
-"""Small helpers for working with the SQLite database."""
+"""Small helpers for working with Trip Management's SQLite database."""
 
 import os
 import sqlite3

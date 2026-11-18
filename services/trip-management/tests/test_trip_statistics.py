@@ -25,13 +25,6 @@ def add_student(conn, registration_id, name, status):
     )
 
 
-def assign_room(conn, registration_id):
-    conn.execute(
-        "INSERT INTO room_assignments (room_id, registration_id) VALUES (1, ?)",
-        (registration_id,)
-    )
-
-
 def test_empty_trip_statistics(test_db):
     # Create a trip with 100 available places.
     add_trip(test_db, 100)
@@ -45,8 +38,6 @@ def test_empty_trip_statistics(test_db):
     assert result["pending_payment"] == 0
     assert result["waitlisted"] == 0
     assert result["places_remaining"] == 100
-    assert result["room_assigned"] == 0
-    assert result["need_room"] == 0
     assert result["occupancy_percent"] == 0.0
 
 
@@ -60,12 +51,6 @@ def test_trip_statistics_with_students(test_db):
     add_student(test_db, 3, "Lucas", "confirmed")
     add_student(test_db, 4, "Daniel", "waitlisted")
 
-    # Create a room and assign Sofia and Emma.
-    test_db.execute(
-        "INSERT INTO rooms (id, trip_id, name, capacity) VALUES (1, 1, 'Room A', 4)"
-    )
-    assign_room(test_db, 1)
-    assign_room(test_db, 2)
     test_db.commit()
 
     result = get_trip_statistics(1)
@@ -74,32 +59,21 @@ def test_trip_statistics_with_students(test_db):
     assert result["confirmed"] == 3
     assert result["waitlisted"] == 1
     assert result["places_remaining"] == 2
-    assert result["room_assigned"] == 2
-    assert result["need_room"] == 1
     assert result["occupancy_percent"] == 60.0
 
 
-def test_cancelled_and_waitlisted_students_with_rooms_are_not_counted(test_db):
+def test_cancelled_students_are_not_counted(test_db):
     add_trip(test_db, 5)
     add_student(test_db, 1, "Sofia", "confirmed")
     add_student(test_db, 2, "Emma", "cancelled")
     add_student(test_db, 3, "Daniel", "waitlisted")
-
-    # All three have a room, but only Sofia is confirmed.
-    test_db.execute(
-        "INSERT INTO rooms (id, trip_id, name, capacity) VALUES (1, 1, 'Room A', 4)"
-    )
-    assign_room(test_db, 1)
-    assign_room(test_db, 2)
-    assign_room(test_db, 3)
     test_db.commit()
 
     result = get_trip_statistics(1)
 
     assert result["confirmed"] == 1
     assert result["waitlisted"] == 1
-    assert result["room_assigned"] == 1
-    assert result["need_room"] == 0
+    assert result["places_remaining"] == 4
 
 
 def test_unpaid_reservations_still_take_places(test_db):
@@ -116,8 +90,6 @@ def test_unpaid_reservations_still_take_places(test_db):
     # Only one place is left, because unpaid reservations hold theirs.
     assert result["places_remaining"] == 1
     assert result["occupancy_percent"] == 75.0
-    # Only paid students need a room yet.
-    assert result["need_room"] == 1
 
 
 def test_unknown_trip_raises_error(test_db):
