@@ -8,6 +8,13 @@ server {
     # back as a quick "304 Not Modified" thanks to their ETag.
     add_header Cache-Control "no-cache";
 
+    # Same /health address as the two services, so the cloud can check
+    # that nginx is up. It answers on its own and does not wait on them.
+    location = /health {
+        default_type application/json;
+        return 200 '{"status": "ok"}';
+    }
+
     # The browser only talks to this server. Requests under /trip-api/ and
     # /room-api/ are passed on to the services with the prefix removed, so
     # /trip-api/trips reaches Trip Management as /trips. One origin means
