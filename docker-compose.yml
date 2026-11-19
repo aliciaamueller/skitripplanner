@@ -6,6 +6,7 @@ services:
     build: ./services/trip-management
     environment:
       PORT: "8000"
+      ROOMS_URL: http://room-allocation:8000
     ports:
       - "8001:8000"
     volumes:
