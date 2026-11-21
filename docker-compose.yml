@@ -1,6 +1,7 @@
 # Whole system locally: docker compose up --build
 # The two domain services, one container each, and the UI in front.
-# Open http://localhost:8080. SQL Server and the database init job are added next.
+# Open http://localhost:8080. SQL Server and a db-init job run beside them;
+# the services still use SQLite until they are switched over.
 services:
   trip-management:
     build: ./services/trip-management
@@ -35,8 +36,47 @@ services:
       - trip-management
       - room-allocation
 
+  # The database server. One server, but each service gets its own
+  # database (trips, rooms), created by db-init below. The password
+  # comes from .env (copy .env.example), so it is never committed.
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-CU15-ubuntu-22.04
+    platform: linux/amd64
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?copy .env.example to .env and set a password}
+    volumes:
+      - sqlserver-data:/var/opt/mssql
+    healthcheck:
+      test: /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P "$$MSSQL_SA_PASSWORD" -Q "SELECT 1" -b -o /dev/null
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  # One-shot job: waits until SQL Server answers, runs the two scripts
+  # (each only creates what is missing) and exits.
+  db-init:
+    image: mcr.microsoft.com/mssql/server:2022-CU15-ubuntu-22.04
+    platform: linux/amd64
+    environment:
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?copy .env.example to .env and set a password}
+    volumes:
+      - ./services/db-init:/db-init:ro
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >-
+        /opt/mssql-tools18/bin/sqlcmd -C -S sqlserver -U sa -P "$$MSSQL_SA_PASSWORD" -b
+        -i /db-init/01-trips.sql -i /db-init/02-rooms.sql
+    restart: "no"
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+
 # One volume per service: each owns its own SQLite file until the
-# database server is added.
+# services are switched to SQL Server.
 volumes:
   trips-data:
   rooms-data:
+  sqlserver-data:
