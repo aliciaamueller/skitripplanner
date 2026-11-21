@@ -30,10 +30,10 @@ jobs:
       packages: write
     strategy:
       matrix:
-        service: [trip-management, room-allocation, UI]
+        service: [trip-management, room-allocation]
     steps:
       - uses: actions/checkout@v4
-      # Image names must be lowercase; the owner name and the UI folder are not.
+      # Image names must be lowercase; the owner name may not be.
       - run: |
           echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
           echo "IMAGE=skitripplanner-${SERVICE,,}" >> "$GITHUB_ENV"

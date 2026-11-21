@@ -1,5 +1,5 @@
 # Whole system locally: docker compose up --build
-# The two domain services, one container each, and the UI in front.
+# The two domain services, one container each, and nginx serving the static UI.
 # Open http://localhost:8080. SQL Server and a db-init job run beside them;
 # the services still use SQLite until they are switched over.
 services:
@@ -8,6 +8,7 @@ services:
     environment:
       PORT: "8000"
       ROOMS_URL: http://room-allocation:8000
+      CORS_ORIGIN: http://localhost:8080
     ports:
       - "8001:8000"
     volumes:
@@ -18,6 +19,7 @@ services:
     environment:
       PORT: "8000"
       TRIPS_URL: http://trip-management:8000
+      CORS_ORIGIN: http://localhost:8080
     ports:
       - "8002:8000"
     volumes:
@@ -25,13 +27,15 @@ services:
     depends_on:
       - trip-management
 
+  # The UI is only static files: a stock nginx image serves the ui/
+  # folder as it is, with no Dockerfile. The browser then calls the two
+  # services directly on 8001 and 8002 (see ui/config.js).
   ui:
-    build: ./services/UI
-    environment:
-      TRIPS_URL: http://trip-management:8000
-      ROOMS_URL: http://room-allocation:8000
+    image: nginx:1.27-alpine
+    volumes:
+      - ./ui:/usr/share/nginx/html:ro
     ports:
-      - "8080:8080"
+      - "8080:80"
     depends_on:
       - trip-management
       - room-allocation

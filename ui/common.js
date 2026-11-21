@@ -1,8 +1,9 @@
 // Helpers shared by every page.
 
-// nginx forwards these prefixes to the two services.
-const TRIPS = "/trip-api";
-const ROOMS = "/room-api";
+// Base URLs of the two services, from config.js. The browser calls them
+// directly; each service allows this page's origin through CORS.
+const TRIPS = window.CONFIG.TRIPS_URL;
+const ROOMS = window.CONFIG.ROOMS_URL;
 
 // Call a service. With `data` it is a POST with a JSON body, otherwise a GET.
 // If the service answers with an error, throw it so the page can show it.

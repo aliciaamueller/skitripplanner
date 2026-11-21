@@ -23,7 +23,28 @@ from room_allocation import (
 # Commit SHA of the running image, set by the pipeline at deploy time.
 VERSION = os.environ.get("GIT_SHA", "dev")
 
+# The UI's address. Browsers only let a page from this origin call the
+# service; locally it is the compose nginx, on Azure the storage website.
+CORS_ORIGIN = os.environ.get("CORS_ORIGIN", "http://localhost:8080")
+
 app = Flask(__name__)
+
+
+@app.after_request
+def allow_ui_origin(response):
+    """CORS: tell the browser that the UI, and only the UI, may read the answer.
+
+    Flask answers the browser's OPTIONS preflight on its own, and this runs
+    on that answer too, so JSON POSTs from the UI are allowed as well.
+    """
+    if request.headers.get("Origin") == CORS_ORIGIN:
+        response.headers["Access-Control-Allow-Origin"] = CORS_ORIGIN
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    # The answer depends on the Origin header, so caches must not share it.
+    response.vary.add("Origin")
+    return response
+
 
 # Create any missing tables when the service starts. Safe to repeat.
 init_db()

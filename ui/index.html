@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Organiser · Ski Club</title>
+    <title>Home · Ski Club</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:wght@600;700&family=Nunito:wght@400;600;700&display=swap">
     <link rel="stylesheet" href="style.css">
@@ -23,42 +23,42 @@
             </svg>
             Ski <span>Club</span></a>
         <nav>
-            <a href="organiser.html" class="active">Organiser</a>
+            <a href="organiser.html">Organiser</a>
             <a href="my-trip.html">My trip</a>
         </nav>
     </header>
 
     <main>
-        <section class="page-heading">
-            <p class="eyebrow">Organiser</p>
-            <h1>Your trips</h1>
-            <p class="muted">Places, payments and waiting lists for every trip this season.</p>
-        </section>
-
-        <div id="message" hidden></div>
-
-        <section class="section">
-            <div class="grid" id="trips"></div>
-        </section>
-
-        <section class="section">
-            <h2>Create a trip</h2>
-            <div class="panel">
-                <form id="create-trip">
-                    <label>Trip name <input name="name" placeholder="Andorra 2027" required></label>
-                    <label>Destination <input name="destination" placeholder="Grandvalira" required></label>
-                    <label>Start date <input type="date" name="start_date" required></label>
-                    <label>End date <input type="date" name="end_date" required></label>
-                    <label>Places <input type="number" name="capacity" min="1" placeholder="150" required></label>
-                    <button type="submit">Create trip</button>
-                </form>
+        <section class="hero">
+            <div>
+                <p class="eyebrow">University ski club</p>
+                <h1>Fresh snow, sorted trips.</h1>
+                <p>Organisers fill the places and share out the rooms. Students see their trip, their room and what to pack.</p>
             </div>
+            <video class="hero-video" src="skier.mp4" poster="skier.jpg"
+                   autoplay muted loop playsinline aria-label="A skier gliding down a snowy slope"></video>
+        </section>
+
+        <section class="choices">
+            <a href="organiser.html" class="choice">
+                <p class="eyebrow">For organisers</p>
+                <h2>Run the trips</h2>
+                <p>Create trips, take registrations and payments, run the waiting list and put everyone in a room.</p>
+                <span class="go">Open the dashboard →</span>
+            </a>
+            <a href="my-trip.html" class="choice going">
+                <p class="eyebrow">For students</p>
+                <h2>I am going</h2>
+                <p>Look up your place with your registration number, count down to the trip and tick off your packing list.</p>
+                <span class="go">See my trip →</span>
+            </a>
         </section>
     </main>
 
     <footer class="footer">Ski Club · Trips, places and rooms for the university ski club</footer>
 
+    <script src="config.js"></script>
     <script src="common.js"></script>
-    <script src="organiser.js"></script>
+    
 </body>
 </html>
