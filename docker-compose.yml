@@ -41,14 +41,15 @@ services:
       - room-allocation
 
   # The database server. One server, but each service gets its own
-  # database (trips, rooms), created by db-init below. The password
-  # comes from .env (copy .env.example), so it is never committed.
+  # database (trips, rooms) and its own login, created by db-init below.
+  # The passwords come from .env (copy .env.example), so they are never
+  # committed.
   sqlserver:
-    image: mcr.microsoft.com/mssql/server:2022-CU15-ubuntu-22.04
+    image: mcr.microsoft.com/mssql/server:2022-latest
     platform: linux/amd64
     environment:
       ACCEPT_EULA: "Y"
-      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?copy .env.example to .env and set a password}
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?copy .env.example to .env and set the passwords}
     volumes:
       - sqlserver-data:/var/opt/mssql
     healthcheck:
@@ -58,21 +59,22 @@ services:
       retries: 20
       start_period: 20s
 
-  # One-shot job: waits until SQL Server answers, runs the two scripts
-  # (each only creates what is missing) and exits.
+  # One-shot job: waits until SQL Server answers, runs db/init.sql (which
+  # only creates what is missing) and exits. sqlcmd fills the script's
+  # $(TRIPS_DB_PASSWORD) and $(ROOMS_DB_PASSWORD) from these variables.
   db-init:
-    image: mcr.microsoft.com/mssql/server:2022-CU15-ubuntu-22.04
+    image: mcr.microsoft.com/mssql/server:2022-latest
     platform: linux/amd64
     environment:
-      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?copy .env.example to .env and set a password}
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?copy .env.example to .env and set the passwords}
+      TRIPS_DB_PASSWORD: ${TRIPS_DB_PASSWORD:?copy .env.example to .env and set the passwords}
+      ROOMS_DB_PASSWORD: ${ROOMS_DB_PASSWORD:?copy .env.example to .env and set the passwords}
     volumes:
-      - ./services/db-init:/db-init:ro
+      - ./db:/db:ro
     entrypoint:
       - /bin/sh
       - -c
-      - >-
-        /opt/mssql-tools18/bin/sqlcmd -C -S sqlserver -U sa -P "$$MSSQL_SA_PASSWORD" -b
-        -i /db-init/01-trips.sql -i /db-init/02-rooms.sql
+      - /opt/mssql-tools18/bin/sqlcmd -C -S sqlserver -U sa -P "$$MSSQL_SA_PASSWORD" -b -i /db/init.sql
     restart: "no"
     depends_on:
       sqlserver:
