@@ -24,4 +24,6 @@ USER appuser
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "exec gunicorn --bind 0.0.0.0:${PORT} --access-logfile - app:app"]
+# One access log line per request on stdout: method, path, status and
+# duration in milliseconds, e.g. "GET /trips 200 12ms".
+CMD ["sh", "-c", "exec gunicorn --bind 0.0.0.0:${PORT} --access-logfile - --access-logformat '%(m)s %(U)s %(s)s %(M)sms' app:app"]
