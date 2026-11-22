@@ -9,7 +9,12 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        service: [trip-management, room-allocation]
+        include:
+          # core: the business-logic modules whose coverage must be >= 70%.
+          - service: trip-management
+            core: --cov=trip_management --cov=trip_statistics
+          - service: room-allocation
+            core: --cov=room_allocation
     defaults:
       run:
         working-directory: services/${{ matrix.service }}
@@ -18,7 +23,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -r requirements.txt pytest==9.1.1 ruff==0.14.0
+      - run: pip install -r requirements.txt pytest==9.1.1 pytest-cov==7.0.0 ruff==0.14.0
       - run: ruff check .
       # The tests run against a real SQL Server, never against Azure SQL.
       # This throwaway one lives only for this job, and its password is
@@ -39,10 +44,23 @@ jobs:
             sleep 2
           done
           echo "SQL Server did not start"; docker logs sqlserver; exit 1
-      - run: pytest
+      # Fails the job if the core logic is below 70% covered.
+      - run: pytest ${{ matrix.core }} --cov-report=term-missing --cov-fail-under=70
+
+  # The machine-readable description must match the schema and the spec.
+  describe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install check-jsonschema==0.33.0 openapi-spec-validator==0.7.1
+      - run: check-jsonschema --schemafile system.schema.json system.yaml
+      - run: openapi-spec-validator services/trip-management/openapi.yaml services/room-allocation/openapi.yaml
 
   images:
-    needs: test
+    needs: [test, describe]
     runs-on: ubuntu-latest
     permissions:
       contents: read
