@@ -1,7 +1,8 @@
 # Whole system locally: docker compose up --build
 # The two domain services, one container each, and nginx serving the static UI.
-# Open http://localhost:8080. SQL Server and a db-init job run beside them;
-# the services still use SQLite until they are switched over.
+# Open http://localhost:8080. Needs a .env file: copy .env.example.
+# Order: sqlserver is healthy -> db-init creates the databases and logins
+# -> each service applies its own migrations at startup.
 services:
   trip-management:
     build: ./services/trip-management
@@ -9,10 +10,13 @@ services:
       PORT: "8000"
       ROOMS_URL: http://room-allocation:8000
       CORS_ORIGIN: http://localhost:8080
+      # Its own database with its own login; the password comes from .env.
+      DATABASE_URL: mssql://trips_app:${TRIPS_DB_PASSWORD:?copy .env.example to .env and set the passwords}@sqlserver:1433/trips
     ports:
       - "8001:8000"
-    volumes:
-      - trips-data:/data
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
 
   room-allocation:
     build: ./services/room-allocation
@@ -20,12 +24,14 @@ services:
       PORT: "8000"
       TRIPS_URL: http://trip-management:8000
       CORS_ORIGIN: http://localhost:8080
+      DATABASE_URL: mssql://rooms_app:${ROOMS_DB_PASSWORD:?copy .env.example to .env and set the passwords}@sqlserver:1433/rooms
     ports:
       - "8002:8000"
-    volumes:
-      - rooms-data:/data
     depends_on:
-      - trip-management
+      db-init:
+        condition: service_completed_successfully
+      trip-management:
+        condition: service_started
 
   # The UI is only static files: a stock nginx image serves the ui/
   # folder as it is, with no Dockerfile. The browser then calls the two
@@ -50,6 +56,10 @@ services:
     environment:
       ACCEPT_EULA: "Y"
       MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?copy .env.example to .env and set the passwords}
+    # Published on this machine only, so tests and tools on the host can
+    # reach it (see README, Testing).
+    ports:
+      - "127.0.0.1:1433:1433"
     volumes:
       - sqlserver-data:/var/opt/mssql
     healthcheck:
@@ -80,9 +90,6 @@ services:
       sqlserver:
         condition: service_healthy
 
-# One volume per service: each owns its own SQLite file until the
-# services are switched to SQL Server.
+# SQL Server keeps both databases here, so data survives `docker compose down`.
 volumes:
-  trips-data:
-  rooms-data:
   sqlserver-data:
