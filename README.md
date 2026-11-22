@@ -5,7 +5,7 @@ Alicia Mueller Reglero | IE University
 
 *Managing the trip is one thing. Managing everyone going is another.*
 
-**Live:** https://amuellerieu2024ui.z6.web.core.windows.net (the first visit after a quiet hour can take about a minute while Azure starts the services and wakes the databases)
+**Live:** https://amuellerieu2024ui.z1.web.core.windows.net (the first visit after a quiet hour can take about a minute while Azure starts the services and wakes the databases)
 
 ## Why I built this
 
@@ -204,7 +204,7 @@ The professor's `container/run.sh` checks the single-container app from Assignme
 
 ## 5. Deployment on Azure
 
-**Live URL:** https://amuellerieu2024ui.z6.web.core.windows.net
+**Live URL:** https://amuellerieu2024ui.z1.web.core.windows.net
 
 Everything runs in the Azure for Students subscription, in resource group `rg-amueller-ieu2024` (region `germanywestcentral`):
 
