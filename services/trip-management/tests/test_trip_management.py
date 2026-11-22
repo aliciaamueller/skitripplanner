@@ -36,7 +36,7 @@ def test_create_trip(test_db):
         (trip_id,)
     ).fetchone()
 
-    assert tuple(trip) == ("Andorra 2027", "Grandvalira", 100)
+    assert tuple(trip.values()) == ("Andorra 2027", "Grandvalira", 100)
 
 
 def test_create_trip_with_invalid_capacity(test_db):
