@@ -5,6 +5,14 @@
 const TRIPS = window.CONFIG.TRIPS_URL;
 const ROOMS = window.CONFIG.ROOMS_URL;
 
+// On Azure an idle service is stopped and its database paused. The first
+// request starts them again, which can take about a minute; meanwhile the
+// request fails or Azure answers 503. Show this instead of a blank page.
+const STARTING_UP = "The service is starting up after being idle. Please try again in a minute.";
+
+// Give up on a request after 40 seconds instead of leaving the page hanging.
+const REQUEST_TIMEOUT_MS = 40000;
+
 // Call a service. With `data` it is a POST with a JSON body, otherwise a GET.
 // If the service answers with an error, throw it so the page can show it.
 async function api(url, data) {
@@ -13,8 +21,19 @@ async function api(url, data) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
     };
+    options.signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
 
-    const response = await fetch(url, options);
+    let response;
+    try {
+        response = await fetch(url, options);
+    } catch (error) {
+        // No answer at all: the service is unreachable, starting or too slow.
+        throw new Error(STARTING_UP);
+    }
+    if (response.status === 503) {
+        throw new Error(STARTING_UP);
+    }
+
     const result = await response.json().catch(() => null);
 
     if (!response.ok) {

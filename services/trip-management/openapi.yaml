@@ -1,0 +1,256 @@
+openapi: 3.0.3
+info:
+  title: Trip Management
+  version: "1.0"
+  description: >
+    Trips, registrations, payments, cancellations and the waiting list.
+    Every rule the domain enforces answers 400 with {"error": "..."}.
+    Cancelling a registration calls Room Allocation's
+    POST /registrations/{registration_id}/release (ROOMS_URL).
+servers:
+  - url: http://localhost:8001
+    description: docker compose
+paths:
+  /health:
+    get:
+      summary: Whether this service can read and write its own database
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+        "503":
+          description: The database cannot be read or written
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+  /trips:
+    get:
+      summary: Every trip with its registration statistics, soonest first
+      responses:
+        "200":
+          description: Trips
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/TripWithStats" }
+    post:
+      summary: Create a trip
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NewTrip" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Id" }
+        "400": { $ref: "#/components/responses/Error" }
+  /trips/{trip_id}:
+    get:
+      summary: One trip with its statistics (Room Allocation uses it to check that a trip exists)
+      parameters: [{ $ref: "#/components/parameters/TripId" }]
+      responses:
+        "200":
+          description: The trip
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TripWithStats" }
+        "404": { $ref: "#/components/responses/Error" }
+  /trips/{trip_id}/registrations:
+    get:
+      summary: A trip's registrations in the order they signed up
+      parameters: [{ $ref: "#/components/parameters/TripId" }]
+      responses:
+        "200":
+          description: Registrations
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/RegistrationListItem" }
+    post:
+      summary: Register a student; they get a place (48 h to pay) or join the waiting list
+      parameters: [{ $ref: "#/components/parameters/TripId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email]
+              properties:
+                name: { type: string }
+                email: { type: string }
+      responses:
+        "201":
+          description: Registered
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Id" }
+        "400": { $ref: "#/components/responses/Error" }
+  /registrations/{registration_id}:
+    get:
+      summary: A registration's trip and status, without personal data (used by Room Allocation)
+      parameters: [{ $ref: "#/components/parameters/RegistrationId" }]
+      responses:
+        "200":
+          description: The registration
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RegistrationSummary" }
+        "404": { $ref: "#/components/responses/Error" }
+  /registrations/{registration_id}/payment:
+    post:
+      summary: Mark a reserved place as paid
+      parameters: [{ $ref: "#/components/parameters/RegistrationId" }]
+      responses:
+        "200":
+          description: Paid
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Status" }
+        "400": { $ref: "#/components/responses/Error" }
+  /registrations/{registration_id}/cancel:
+    post:
+      summary: Cancel a registration; Room Allocation frees the bed in the same request
+      description: >
+        Calls Room Allocation's release endpoint. If Room Allocation cannot
+        be reached, the cancellation is rolled back and 400 is returned with
+        "Room Allocation is unavailable, please try again".
+      parameters: [{ $ref: "#/components/parameters/RegistrationId" }]
+      responses:
+        "200":
+          description: Cancelled
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Status" }
+        "400": { $ref: "#/components/responses/Error" }
+  /my-trip:
+    post:
+      summary: A student's own registration and trip, found by number and email
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [registration_id, email]
+              properties:
+                registration_id: { type: integer }
+                email: { type: string }
+      responses:
+        "200":
+          description: The student's registration and trip
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [registration, trip]
+                properties:
+                  registration:
+                    type: object
+                    properties:
+                      id: { type: integer }
+                      trip_id: { type: integer }
+                      name: { type: string }
+                      status: { $ref: "#/components/schemas/RegistrationStatus" }
+                      payment_deadline: { type: string, format: date-time, nullable: true }
+                  trip: { $ref: "#/components/schemas/Trip" }
+        "400": { $ref: "#/components/responses/Error" }
+components:
+  parameters:
+    TripId:
+      name: trip_id
+      in: path
+      required: true
+      schema: { type: integer }
+    RegistrationId:
+      name: registration_id
+      in: path
+      required: true
+      schema: { type: integer }
+  responses:
+    Error:
+      description: A rule was broken or the item does not exist
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [error]
+            properties:
+              error: { type: string }
+  schemas:
+    Health:
+      type: object
+      required: [status, db, service, version]
+      properties:
+        status: { type: string, enum: [ok, error] }
+        db: { type: string, enum: [ok, unavailable] }
+        service: { type: string }
+        version: { type: string, description: Git commit SHA of the running image }
+    Id:
+      type: object
+      required: [id]
+      properties:
+        id: { type: integer }
+    Status:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string }
+    RegistrationStatus:
+      type: string
+      enum: [pending_payment, confirmed, waitlisted, cancelled]
+    NewTrip:
+      type: object
+      required: [name, destination, start_date, end_date, capacity]
+      properties:
+        name: { type: string }
+        destination: { type: string }
+        start_date: { type: string, format: date }
+        end_date: { type: string, format: date }
+        capacity: { type: integer, minimum: 1 }
+    Trip:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        destination: { type: string }
+        start_date: { type: string, format: date }
+        end_date: { type: string, format: date }
+        capacity: { type: integer }
+    TripWithStats:
+      allOf:
+        - $ref: "#/components/schemas/Trip"
+        - type: object
+          properties:
+            stats:
+              type: object
+              properties:
+                capacity: { type: integer }
+                confirmed: { type: integer }
+                pending_payment: { type: integer }
+                waitlisted: { type: integer }
+                places_remaining: { type: integer }
+                occupancy_percent: { type: number }
+    RegistrationListItem:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        email: { type: string }
+        status: { $ref: "#/components/schemas/RegistrationStatus" }
+        registered_at: { type: string, format: date-time }
+        payment_deadline: { type: string, format: date-time, nullable: true }
+    RegistrationSummary:
+      type: object
+      required: [id, trip_id, status]
+      properties:
+        id: { type: integer }
+        trip_id: { type: integer }
+        status: { $ref: "#/components/schemas/RegistrationStatus" }

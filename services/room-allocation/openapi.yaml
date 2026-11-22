@@ -1,0 +1,211 @@
+openapi: 3.0.3
+info:
+  title: Room Allocation
+  version: "1.0"
+  description: >
+    Rooms, room assignments and roommate preferences. Every rule the domain
+    enforces answers 400 with {"error": "..."}. Trips and registrations
+    belong to Trip Management: this service checks them by calling its
+    GET /trips/{trip_id} and GET /registrations/{registration_id} (TRIPS_URL);
+    if Trip Management cannot be reached, those requests answer 400 with
+    "Trip Management is unavailable".
+servers:
+  - url: http://localhost:8002
+    description: docker compose
+paths:
+  /health:
+    get:
+      summary: Whether this service can read and write its own database
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+        "503":
+          description: The database cannot be read or written
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+  /trips/{trip_id}/rooms:
+    get:
+      summary: A trip's rooms with how many beds are taken (checks the trip with Trip Management)
+      parameters: [{ $ref: "#/components/parameters/TripId" }]
+      responses:
+        "200":
+          description: Rooms
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: integer }
+                    name: { type: string }
+                    capacity: { type: integer }
+                    occupied: { type: integer }
+        "400": { $ref: "#/components/responses/Error" }
+    post:
+      summary: Create a room with 1 to 6 beds for an existing trip
+      parameters: [{ $ref: "#/components/parameters/TripId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, capacity]
+              properties:
+                name: { type: string }
+                capacity: { type: integer, minimum: 1, maximum: 6 }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Id" }
+        "400": { $ref: "#/components/responses/Error" }
+  /trips/{trip_id}/assignments:
+    get:
+      summary: Who sleeps where on a trip
+      parameters: [{ $ref: "#/components/parameters/TripId" }]
+      responses:
+        "200":
+          description: Assignments
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    registration_id: { type: integer }
+                    room_id: { type: integer }
+                    room_name: { type: string }
+  /rooms/{room_id}/assignments:
+    post:
+      summary: Put a confirmed student in a room on the same trip
+      parameters:
+        - name: room_id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [registration_id]
+              properties:
+                registration_id: { type: integer }
+      responses:
+        "201":
+          description: Assigned
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Id" }
+        "400": { $ref: "#/components/responses/Error" }
+  /trips/{trip_id}/preferences:
+    get:
+      summary: A trip's roommate requests
+      parameters: [{ $ref: "#/components/parameters/TripId" }]
+      responses:
+        "200":
+          description: Requests as pairs of registration IDs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    registration_id: { type: integer }
+                    preferred_registration_id: { type: integer }
+  /preferences:
+    post:
+      summary: Record that one confirmed student wants to share with another
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [registration_id, preferred_registration_id]
+              properties:
+                registration_id: { type: integer }
+                preferred_registration_id: { type: integer }
+      responses:
+        "201":
+          description: Recorded
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Id" }
+        "400": { $ref: "#/components/responses/Error" }
+  /registrations/{registration_id}/room:
+    get:
+      summary: The room a student sleeps in, or null if none yet
+      parameters: [{ $ref: "#/components/parameters/RegistrationId" }]
+      responses:
+        "200":
+          description: The room, or null
+          content:
+            application/json:
+              schema:
+                type: object
+                nullable: true
+                properties:
+                  name: { type: string }
+                  capacity: { type: integer }
+                  occupied: { type: integer }
+  /registrations/{registration_id}/release:
+    post:
+      summary: Free a cancelled student's bed and drop their roommate requests (called by Trip Management; safe to repeat)
+      parameters: [{ $ref: "#/components/parameters/RegistrationId" }]
+      responses:
+        "200":
+          description: Released
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { type: string, enum: [released] }
+components:
+  parameters:
+    TripId:
+      name: trip_id
+      in: path
+      required: true
+      schema: { type: integer }
+    RegistrationId:
+      name: registration_id
+      in: path
+      required: true
+      schema: { type: integer }
+  responses:
+    Error:
+      description: A rule was broken, an item does not exist, or Trip Management is unavailable
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [error]
+            properties:
+              error: { type: string }
+  schemas:
+    Health:
+      type: object
+      required: [status, db, service, version]
+      properties:
+        status: { type: string, enum: [ok, error] }
+        db: { type: string, enum: [ok, unavailable] }
+        service: { type: string }
+        version: { type: string, description: Git commit SHA of the running image }
+    Id:
+      type: object
+      required: [id]
+      properties:
+        id: { type: integer }

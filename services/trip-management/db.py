@@ -187,3 +187,30 @@ def migrate(folder=MIGRATIONS_DIR):
         return applied
     finally:
         conn.close()
+
+
+def check_health():
+    """True if this service can read and write its own database right now.
+
+    It reads schema_migrations and makes a real write to it inside a
+    transaction that is then rolled back, so nothing changes. Only one
+    connection attempt: a health check must answer quickly.
+    """
+    try:
+        conn = get_connection(attempts=1)
+    except Exception:
+        log.warning("Health check: cannot connect to the database")
+        return False
+    try:
+        conn.execute("SELECT TOP 1 version FROM schema_migrations").fetchone()
+        conn.execute(
+            "UPDATE schema_migrations SET applied_at = applied_at"
+            " WHERE version = (SELECT MIN(version) FROM schema_migrations)"
+        )
+        return True
+    except Exception:
+        log.warning("Health check: cannot read or write the database")
+        return False
+    finally:
+        conn.rollback()
+        conn.close()

@@ -20,9 +20,14 @@ let timer;
 
 onSubmit(document.getElementById("find-trip"), async (values) => {
     const { registration, trip } = await api(`${TRIPS}/my-trip`, values);
-    const room = await api(`${ROOMS}/registrations/${registration.id}/room`);
+    // The room comes from the other service; if it is down, show the trip
+    // anyway and say the room cannot be shown right now.
+    const room = await api(`${ROOMS}/registrations/${registration.id}/room`).catch(() => undefined);
 
-    showTrip(registration, trip, room);
+    showTrip(registration, trip, room ?? null);
+    if (room === undefined) {
+        return `Welcome back, ${registration.name}! Your room cannot be shown right now, please check again later.`;
+    }
     return `Welcome back, ${registration.name}!`;
 });
 

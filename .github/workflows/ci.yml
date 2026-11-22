@@ -9,7 +9,12 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        service: [trip-management, room-allocation]
+        include:
+          # core: the business-logic modules whose coverage must be >= 70%.
+          - service: trip-management
+            core: --cov=trip_management --cov=trip_statistics
+          - service: room-allocation
+            core: --cov=room_allocation
     defaults:
       run:
         working-directory: services/${{ matrix.service }}
@@ -18,7 +23,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -r requirements.txt pytest==9.1.1 ruff==0.14.0
+      - run: pip install -r requirements.txt pytest==9.1.1 pytest-cov==7.0.0 ruff==0.14.0
       - run: ruff check .
       # The tests run against a real SQL Server, never against Azure SQL.
       # This throwaway one lives only for this job, and its password is
@@ -39,10 +44,23 @@ jobs:
             sleep 2
           done
           echo "SQL Server did not start"; docker logs sqlserver; exit 1
-      - run: pytest
+      # Fails the job if the core logic is below 70% covered.
+      - run: pytest ${{ matrix.core }} --cov-report=term-missing --cov-fail-under=70
+
+  # The machine-readable description must match the schema and the spec.
+  describe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install check-jsonschema==0.33.0 openapi-spec-validator==0.7.1
+      - run: check-jsonschema --schemafile system.schema.json system.yaml
+      - run: openapi-spec-validator services/trip-management/openapi.yaml services/room-allocation/openapi.yaml
 
   images:
-    needs: test
+    needs: [test, describe]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -74,3 +92,84 @@ jobs:
           tags: ghcr.io/${{ env.OWNER }}/${{ env.IMAGE }}:${{ github.sha }}
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+  # CD: only on main, and only after the tests passed and the images of this
+  # same commit were pushed. Signs in to Azure as the managed identity
+  # through OpenID Connect, so no Azure password exists anywhere.
+  deploy:
+    needs: images
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      PREFIX: amueller-ieu2024
+      RG: rg-amueller-ieu2024
+      STORAGE: amuellerieu2024ui
+      REGISTRY: ghcr.io/aliciaamueller
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - run: az extension add --name containerapp --upgrade --yes --only-show-errors
+
+      # Every address is derived, not hardcoded: the UI's from the storage
+      # account, the services' from the Container Apps environment's domain.
+      - name: Work out the public addresses
+        run: |
+          WEB=$(az storage account show -g "$RG" -n "$STORAGE" --query primaryEndpoints.web -o tsv)
+          DOMAIN=$(az containerapp env show -g "$RG" -n "$PREFIX-env" --query properties.defaultDomain -o tsv)
+          {
+            echo "UI_ORIGIN=${WEB%/}"
+            echo "TRIPS_PUBLIC=https://$PREFIX-trip-management.$DOMAIN"
+            echo "ROOMS_PUBLIC=https://$PREFIX-room-allocation.$DOMAIN"
+          } >> "$GITHUB_ENV"
+
+      # Each service: its image tagged with this commit, 0 to 1 replicas,
+      # and its DATABASE_URL as a Container Apps secret, never a plain value.
+      - name: Deploy the two services
+        env:
+          TRIPS_DATABASE_URL: ${{ secrets.TRIPS_DATABASE_URL }}
+          ROOMS_DATABASE_URL: ${{ secrets.ROOMS_DATABASE_URL }}
+        run: |
+          deploy() {  # service, database URL, other env vars...
+            app="$PREFIX-$1"; image="$REGISTRY/skitripplanner-$1:$GITHUB_SHA"; db_url="$2"; shift 2
+            env_vars=(DATABASE_URL=secretref:database-url GIT_SHA="$GITHUB_SHA" CORS_ORIGIN="$UI_ORIGIN" "$@")
+            if az containerapp show -g "$RG" -n "$app" --output none 2>/dev/null; then
+              az containerapp secret set -g "$RG" -n "$app" --secrets database-url="$db_url" --output none
+              az containerapp update -g "$RG" -n "$app" --image "$image" \
+                --min-replicas 0 --max-replicas 1 --set-env-vars "${env_vars[@]}" --output none
+            else
+              az containerapp create -g "$RG" -n "$app" --environment "$PREFIX-env" --image "$image" \
+                --ingress external --target-port 8000 --min-replicas 0 --max-replicas 1 \
+                --secrets database-url="$db_url" --env-vars "${env_vars[@]}" --output none
+            fi
+          }
+          deploy trip-management "$TRIPS_DATABASE_URL" ROOMS_URL="$ROOMS_PUBLIC"
+          deploy room-allocation "$ROOMS_DATABASE_URL" TRIPS_URL="$TRIPS_PUBLIC"
+
+      # The UI is static files; config.js gets the services' Azure addresses.
+      - name: Upload the UI to the static website
+        run: |
+          printf 'window.CONFIG = {\n    TRIPS_URL: "%s",\n    ROOMS_URL: "%s",\n};\n' \
+            "$TRIPS_PUBLIC" "$ROOMS_PUBLIC" > ui/config.js
+          az storage blob upload-batch --account-name "$STORAGE" --auth-mode key \
+            --destination '$web' --source ui --overwrite --output none
+
+      # The first request after idle starts the container and may wake the
+      # paused database (up to about a minute), so allow several minutes.
+      - name: Check that both services are healthy
+        run: |
+          for url in "$TRIPS_PUBLIC" "$ROOMS_PUBLIC"; do
+            for attempt in $(seq 1 30); do
+              status=$(curl -s -o /tmp/health.json -w '%{http_code}' --max-time 60 "$url/health" || true)
+              if [ "$status" = 200 ]; then echo "$url/health: $(cat /tmp/health.json)"; continue 2; fi
+              echo "$url/health answered $status, waiting ($attempt/30)"; sleep 10
+            done
+            echo "$url never became healthy"; exit 1
+          done
+          echo "UI: $UI_ORIGIN"

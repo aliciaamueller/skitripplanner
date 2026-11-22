@@ -27,7 +27,7 @@ from db import get_connection
 def _get_json(path):
     """GET a path from Trip Management. None on 404, ValueError if unreachable."""
     try:
-        with urllib.request.urlopen(config.TRIPS_URL + path, timeout=5) as response:
+        with urllib.request.urlopen(config.TRIPS_URL + path, timeout=config.TRIPS_TIMEOUT_S) as response:
             return json.load(response)
     except urllib.error.HTTPError as error:
         if error.code == 404:
