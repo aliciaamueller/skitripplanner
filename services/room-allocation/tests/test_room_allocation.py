@@ -233,7 +233,7 @@ def test_release_student_removes_roommate_preferences(test_db, trips):
         """
     ).fetchall()
 
-    assert [tuple(row) for row in remaining] == [(ben, cara)]
+    assert [tuple(row.values()) for row in remaining] == [(ben, cara)]
 
 
 def test_release_student_twice_is_harmless(test_db, trips):

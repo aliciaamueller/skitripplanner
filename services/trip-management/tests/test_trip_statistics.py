@@ -7,21 +7,21 @@ def add_trip(conn, capacity):
     conn.execute(
         """
         INSERT INTO trips
-        (id, name, destination, start_date, end_date, capacity)
-        VALUES (1, 'Andorra', 'Andorra', '2027-01-20', '2027-01-24', ?)
+        (name, destination, start_date, end_date, capacity)
+        VALUES ('Andorra', 'Andorra', '2027-01-20', '2027-01-24', ?)
         """,
         (capacity,)
     )
 
 
-def add_student(conn, registration_id, name, status):
+def add_student(conn, name, status):
     conn.execute(
         """
         INSERT INTO registrations
-        (id, trip_id, name, email, status, registered_at)
-        VALUES (?, 1, ?, ?, ?, '2026-10-11T15:00:00')
+        (trip_id, name, email, status, registered_at)
+        VALUES (1, ?, ?, ?, '2026-10-11T15:00:00')
         """,
-        (registration_id, name, f"{name.lower()}@example.com", status)
+        (name, f"{name.lower()}@example.com", status)
     )
 
 
@@ -46,10 +46,10 @@ def test_trip_statistics_with_students(test_db):
     add_trip(test_db, 5)
 
     # Register three confirmed students and one waitlisted student.
-    add_student(test_db, 1, "Sofia", "confirmed")
-    add_student(test_db, 2, "Emma", "confirmed")
-    add_student(test_db, 3, "Lucas", "confirmed")
-    add_student(test_db, 4, "Daniel", "waitlisted")
+    add_student(test_db, "Sofia", "confirmed")
+    add_student(test_db, "Emma", "confirmed")
+    add_student(test_db, "Lucas", "confirmed")
+    add_student(test_db, "Daniel", "waitlisted")
 
     test_db.commit()
 
@@ -64,9 +64,9 @@ def test_trip_statistics_with_students(test_db):
 
 def test_cancelled_students_are_not_counted(test_db):
     add_trip(test_db, 5)
-    add_student(test_db, 1, "Sofia", "confirmed")
-    add_student(test_db, 2, "Emma", "cancelled")
-    add_student(test_db, 3, "Daniel", "waitlisted")
+    add_student(test_db, "Sofia", "confirmed")
+    add_student(test_db, "Emma", "cancelled")
+    add_student(test_db, "Daniel", "waitlisted")
     test_db.commit()
 
     result = get_trip_statistics(1)
@@ -78,9 +78,9 @@ def test_cancelled_students_are_not_counted(test_db):
 
 def test_unpaid_reservations_still_take_places(test_db):
     add_trip(test_db, 4)
-    add_student(test_db, 1, "Sofia", "confirmed")
-    add_student(test_db, 2, "Emma", "pending_payment")
-    add_student(test_db, 3, "Lucas", "pending_payment")
+    add_student(test_db, "Sofia", "confirmed")
+    add_student(test_db, "Emma", "pending_payment")
+    add_student(test_db, "Lucas", "pending_payment")
     test_db.commit()
 
     result = get_trip_statistics(1)

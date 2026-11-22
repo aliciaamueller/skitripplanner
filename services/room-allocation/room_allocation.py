@@ -8,9 +8,10 @@ endpoints of the Room Allocation service.
 """
 
 import json
-import sqlite3
 import urllib.error
 import urllib.request
+
+import pymssql
 
 import config
 from db import get_connection
@@ -58,23 +59,21 @@ def create_room(trip_id, name, capacity):
     if type(capacity) is not int or not 1 <= capacity <= 6:
         raise ValueError("Room capacity must be between 1 and 6")
 
-    # Ask Trip Management before opening the transaction, so the write lock
-    # is never held while waiting on the network.
+    # Ask Trip Management before opening the transaction, so no lock
+    # is held while waiting on the network.
     if not _trip_exists(trip_id):
         raise ValueError("Trip not found")
 
     conn = get_connection()
     try:
-        conn.execute("BEGIN IMMEDIATE")
-
-        cursor = conn.execute(
-            "INSERT INTO rooms (trip_id, name, capacity) VALUES (?, ?, ?)",
+        room_id = conn.execute(
+            "INSERT INTO rooms (trip_id, name, capacity) OUTPUT INSERTED.id VALUES (?, ?, ?)",
             (trip_id, name.strip(), capacity)
-        )
+        ).fetchone()["id"]
         conn.commit()
-        return cursor.lastrowid
+        return room_id
 
-    except sqlite3.IntegrityError as error:
+    except pymssql.IntegrityError as error:
         conn.rollback()
         raise ValueError("A room with this name already exists") from error
     except Exception:
@@ -86,16 +85,16 @@ def create_room(trip_id, name, capacity):
 
 def assign_student(room_id, registration_id):
     """Assign a confirmed student to a room on the same trip."""
-    # Ask Trip Management before opening the transaction, so the write lock
-    # is never held while waiting on the network.
+    # Ask Trip Management before opening the transaction, so no lock
+    # is held while waiting on the network.
     student = _get_registration(registration_id)
 
     conn = get_connection()
     try:
-        conn.execute("BEGIN IMMEDIATE")
-
+        # Lock the room's row until commit, so two assignments cannot both
+        # take its last bed: the second one waits here for the first.
         room = conn.execute(
-            "SELECT trip_id, capacity FROM rooms WHERE id = ?",
+            "SELECT trip_id, capacity FROM rooms WITH (UPDLOCK, HOLDLOCK) WHERE id = ?",
             (room_id,)
         ).fetchone()
 
@@ -119,18 +118,19 @@ def assign_student(room_id, registration_id):
         if occupied >= room["capacity"]:
             raise ValueError("Room is full")
 
-        cursor = conn.execute(
+        assignment_id = conn.execute(
             """
             INSERT INTO room_assignments (room_id, registration_id)
+            OUTPUT INSERTED.id
             VALUES (?, ?)
             """,
             (room_id, registration_id)
-        )
+        ).fetchone()["id"]
 
         conn.commit()
-        return cursor.lastrowid
+        return assignment_id
 
-    except sqlite3.IntegrityError as error:
+    except pymssql.IntegrityError as error:
         conn.rollback()
         raise ValueError("Student already has a room") from error
     except Exception:
@@ -159,7 +159,7 @@ def add_roommate_preference(registration_id, preferred_registration_id):
     if registration_id == preferred_registration_id:
         raise ValueError("A student cannot request themselves")
 
-    # Ask Trip Management first; nothing here needs the write lock.
+    # Ask Trip Management first, before opening a transaction.
     student = _get_registration(registration_id)
     preferred = _get_registration(preferred_registration_id)
 
@@ -174,20 +174,19 @@ def add_roommate_preference(registration_id, preferred_registration_id):
 
     conn = get_connection()
     try:
-        conn.execute("BEGIN IMMEDIATE")
-
-        cursor = conn.execute(
+        preference_id = conn.execute(
             """
             INSERT INTO roommate_preferences
                 (trip_id, registration_id, preferred_registration_id)
+            OUTPUT INSERTED.id
             VALUES (?, ?, ?)
             """,
             (student["trip_id"], registration_id, preferred_registration_id)
-        )
+        ).fetchone()["id"]
         conn.commit()
-        return cursor.lastrowid
+        return preference_id
 
-    except sqlite3.IntegrityError as error:
+    except pymssql.IntegrityError as error:
         conn.rollback()
         raise ValueError("Roommate preference already exists") from error
     except Exception:
@@ -212,7 +211,7 @@ def get_rooms(trip_id):
             LEFT JOIN room_assignments
                 ON room_assignments.room_id = rooms.id
             WHERE rooms.trip_id = ?
-            GROUP BY rooms.id
+            GROUP BY rooms.id, rooms.name, rooms.capacity
             ORDER BY rooms.id
             """,
             (trip_id,)

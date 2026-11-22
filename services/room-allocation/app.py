@@ -4,11 +4,13 @@ The domain logic lives in room_allocation.py. This file only turns HTTP
 requests into calls to it and its answers into JSON.
 """
 
+import logging
 import os
+import sys
 
 from flask import Flask, jsonify, request
 
-from db import init_db
+from db import migrate
 from room_allocation import (
     add_roommate_preference,
     assign_student,
@@ -46,8 +48,12 @@ def allow_ui_origin(response):
     return response
 
 
-# Create any missing tables when the service starts. Safe to repeat.
-init_db()
+# Log lines (such as each migration applied) go to stdout with the access log.
+logging.basicConfig(stream=sys.stdout, level=logging.INFO,
+                    format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+
+# Bring the database schema up to date before serving any request.
+migrate()
 
 
 def body():
