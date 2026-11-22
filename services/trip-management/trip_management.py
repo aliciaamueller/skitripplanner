@@ -1,11 +1,10 @@
 """Trip Management domain: trips, registrations, payments and the waitlist.
 
 Facade: the public functions below (create_trip, register_student,
-confirm_payment, cancel_registration, check_registration_on_trip and
-on_registration_cancelled) are the only way the rest of the app changes
+confirm_payment, cancel_registration, check_registration_on_trip,
+get_trip, get_registration and on_registration_cancelled) are the only way the rest of the app changes
 this domain. Callers never see the SQL, the transactions or the expiry
-rules. In Assignment 2 these become the endpoints of the Trip Management
-service.
+rules. app.py exposes them as the endpoints of the Trip Management service.
 """
 import sqlite3
 from datetime import date, datetime, timedelta, timezone
@@ -15,10 +14,11 @@ from db import get_connection
 # How long a student has to pay before their reserved place is released.
 PAYMENT_WINDOW = timedelta(hours=48)
 
-# Observer: functions from other domains that want to know when a
-# registration is cancelled. Trip Management calls them without knowing what
-# they do, so it never writes to another domain's tables. Room Allocation
-# subscribes to free the student's bed.
+# Observer: functions that want to know when a registration is cancelled.
+# Trip Management calls them without knowing what they do, so it never
+# writes to another domain's tables. In the monolith Room Allocation
+# subscribed here directly; now that it is a separate service, the listener
+# will be one that tells Room Allocation over HTTP to free the bed.
 _cancellation_listeners = []
 
 
@@ -340,6 +340,109 @@ def check_registration_on_trip(trip_id, registration_id):
 
         if registration is None or registration["trip_id"] != trip_id:
             raise ValueError("Registration not found on this trip")
+
+    finally:
+        conn.close()
+
+
+def get_trip(trip_id):
+    """Return a trip as a dict, or None if it does not exist."""
+
+    conn = get_connection()
+
+    try:
+        row = conn.execute(
+            "SELECT * FROM trips WHERE id = ?", (trip_id,)
+        ).fetchone()
+        return None if row is None else dict(row)
+
+    finally:
+        conn.close()
+
+
+def get_registration(registration_id):
+    """Return a registration's id, trip_id and status, or None.
+
+    This is what Room Allocation needs to decide who can get a room, so
+    names and emails are not included.
+    """
+
+    conn = get_connection()
+
+    try:
+        row = conn.execute(
+            "SELECT id, trip_id, status FROM registrations WHERE id = ?",
+            (registration_id,)
+        ).fetchone()
+        return None if row is None else dict(row)
+
+    finally:
+        conn.close()
+
+
+def list_trips():
+    """Return every trip, soonest first."""
+
+    conn = get_connection()
+
+    try:
+        rows = conn.execute(
+            "SELECT * FROM trips ORDER BY start_date, id"
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    finally:
+        conn.close()
+
+
+def list_registrations(trip_id):
+    """Return a trip's registrations in the order they signed up."""
+
+    conn = get_connection()
+
+    try:
+        rows = conn.execute(
+            """
+            SELECT id, name, email, status, registered_at, payment_deadline
+            FROM registrations
+            WHERE trip_id = ?
+            ORDER BY registered_at, id
+            """,
+            (trip_id,)
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    finally:
+        conn.close()
+
+
+def find_my_registration(registration_id, email):
+    """Return a student's own registration and trip, or raise ValueError.
+
+    The email must match, so knowing a registration number alone is not
+    enough to see someone else's trip.
+    """
+
+    conn = get_connection()
+
+    try:
+        row = conn.execute(
+            """
+            SELECT id, trip_id, name, status, payment_deadline
+            FROM registrations
+            WHERE id = ? AND email = ?
+            """,
+            (registration_id, str(email).strip().lower())
+        ).fetchone()
+
+        if row is None:
+            raise ValueError("No registration matches that number and email")
+
+        trip = conn.execute(
+            "SELECT * FROM trips WHERE id = ?", (row["trip_id"],)
+        ).fetchone()
+
+        return {"registration": dict(row), "trip": dict(trip)}
 
     finally:
         conn.close()

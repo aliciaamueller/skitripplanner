@@ -419,3 +419,14 @@ def test_failing_listener_rolls_back_cancellation(test_db, monkeypatch):
         (registration_id,)
     ).fetchone()["status"]
     assert status == "pending_payment"
+
+
+def test_check_registration_on_trip(test_db):
+    trip_id = create_trip("Andorra 2027", "Grandvalira",
+                          "2027-01-20", "2027-01-24", 10)
+    registration_id = register_student(trip_id, "Ana", "ana@ie.edu")
+
+    trip_management.check_registration_on_trip(trip_id, registration_id)
+
+    with pytest.raises(ValueError, match="not found on this trip"):
+        trip_management.check_registration_on_trip(trip_id + 1, registration_id)
