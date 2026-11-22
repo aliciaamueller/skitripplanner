@@ -1,0 +1,60 @@
+# yaml-language-server: $schema=./system.schema.json
+student: amueller.ieu2024
+prefix: amueller-ieu2024
+public_url: https://amuellerieu2024ui.z6.web.core.windows.net
+ui:
+  path: ui
+  storage_account: amuellerieu2024ui
+  calls: [trip-management, room-allocation]
+azure:
+  resource_group: rg-amueller-ieu2024
+  container_apps_environment: amueller-ieu2024-env
+  sql_server: amueller-ieu2024-sql
+  registry: ghcr.io/aliciaamueller
+services:
+  trip-management:
+    description: Trips, registrations, payments, cancellations and the waiting list.
+    path: services/trip-management
+    openapi: services/trip-management/openapi.yaml
+    port_default: 8000
+    health: /health
+    migrations: services/trip-management/migrations
+    env:
+      PORT: { default: 8000, description: Port the service listens on }
+      DATABASE_URL: { secret: true, description: "Connection string of the trip-management database, mssql://<login>:<password>@<server>:1433/<database>" }
+      ROOMS_URL: { default: "http://room-allocation:8000", description: Base URL of the room-allocation service }
+      ROOMS_TIMEOUT_S: { default: 5, description: Seconds to wait for room-allocation before giving up }
+      CORS_ORIGIN: { default: "http://localhost:8080", description: The only origin browsers may call this service from (the UI) }
+      GIT_SHA: { default: dev, description: "Commit SHA of the running image, reported by /health" }
+    calls:
+      - service: room-allocation
+        url_env: ROOMS_URL
+        endpoints: ["POST /registrations/{registration_id}/release"]
+        timeout_s: 5
+        on_failure: The cancellation is rolled back and the organiser sees "Room Allocation is unavailable, please try again"; the registration stays active, so no cancelled student keeps a bed.
+    azure:
+      container_app: amueller-ieu2024-trip-management
+      sql_database: amueller-ieu2024-trip-management-db
+  room-allocation:
+    description: Rooms, room assignments and roommate preferences.
+    path: services/room-allocation
+    openapi: services/room-allocation/openapi.yaml
+    port_default: 8000
+    health: /health
+    migrations: services/room-allocation/migrations
+    env:
+      PORT: { default: 8000, description: Port the service listens on }
+      DATABASE_URL: { secret: true, description: "Connection string of the room-allocation database, mssql://<login>:<password>@<server>:1433/<database>" }
+      TRIPS_URL: { default: "http://trip-management:8000", description: Base URL of the trip-management service }
+      TRIPS_TIMEOUT_S: { default: 5, description: Seconds to wait for trip-management before giving up }
+      CORS_ORIGIN: { default: "http://localhost:8080", description: The only origin browsers may call this service from (the UI) }
+      GIT_SHA: { default: dev, description: "Commit SHA of the running image, reported by /health" }
+    calls:
+      - service: trip-management
+        url_env: TRIPS_URL
+        endpoints: ["GET /trips/{trip_id}", "GET /registrations/{registration_id}"]
+        timeout_s: 5
+        on_failure: Creating rooms, assigning students and adding roommate requests answer 400 "Trip Management is unavailable"; reading existing assignments and preferences keeps working.
+    azure:
+      container_app: amueller-ieu2024-room-allocation
+      sql_database: amueller-ieu2024-room-allocation-db
