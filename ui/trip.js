@@ -4,13 +4,23 @@
 const tripId = Number(new URLSearchParams(location.search).get("id"));
 
 async function showTrip() {
-    const [trip, registrations, rooms, assignments, preferences] = await Promise.all([
-        api(`${TRIPS}/trips/${tripId}`),
-        api(`${TRIPS}/trips/${tripId}/registrations`),
+    // Rooms come from the other service. If Room Allocation is down, the
+    // trip and its registrations still show, with a notice instead of rooms.
+    const roomData = Promise.all([
         api(`${ROOMS}/trips/${tripId}/rooms`),
         api(`${ROOMS}/trips/${tripId}/assignments`),
         api(`${ROOMS}/trips/${tripId}/preferences`),
+    ]).catch(() => null);
+
+    const [trip, registrations, roomResults] = await Promise.all([
+        api(`${TRIPS}/trips/${tripId}`),
+        api(`${TRIPS}/trips/${tripId}/registrations`),
+        roomData,
     ]);
+    const [rooms, assignments, preferences] = roomResults ?? [[], [], []];
+    if (roomResults === null) {
+        showMessage("Rooms are unavailable right now, so they are not shown. Registrations and payments still work.", "error");
+    }
 
     // Look up names and rooms by registration ID.
     const names = Object.fromEntries(registrations.map((r) => [r.id, r.name]));
