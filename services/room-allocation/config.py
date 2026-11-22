@@ -13,3 +13,6 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 # Base URL of the Trip Management service. Room Allocation asks it about
 # trips and registrations over HTTP instead of reading its tables.
 TRIPS_URL = os.environ.get("TRIPS_URL", "http://trip-management:8000")
+
+# Seconds to wait for Trip Management before giving up on a call.
+TRIPS_TIMEOUT_S = float(os.environ.get("TRIPS_TIMEOUT_S", "5"))

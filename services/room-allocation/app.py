@@ -10,7 +10,7 @@ import sys
 
 from flask import Flask, jsonify, request
 
-from db import migrate
+from db import check_health, migrate
 from room_allocation import (
     add_roommate_preference,
     assign_student,
@@ -69,8 +69,14 @@ def bad_request(error):
 
 @app.get("/health")
 def health():
-    """Report that the service is up. The database check is added with the database."""
-    return jsonify(status="ok", service="room-allocation", version=VERSION)
+    """200 if this service can read and write its own database, 503 if not.
+
+    Only this service's own state counts: the other service being down
+    does not make this one unhealthy.
+    """
+    if check_health():
+        return jsonify(status="ok", db="ok", service="room-allocation", version=VERSION)
+    return jsonify(status="error", db="unavailable", service="room-allocation", version=VERSION), 503
 
 
 @app.get("/trips/<int:trip_id>/rooms")

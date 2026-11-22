@@ -12,7 +12,7 @@ import urllib.request
 
 from flask import Flask, jsonify, request
 
-from db import migrate
+from db import check_health, migrate
 from trip_management import (
     cancel_registration,
     confirm_payment,
@@ -36,6 +36,9 @@ CORS_ORIGIN = os.environ.get("CORS_ORIGIN", "http://localhost:8080")
 
 # Base URL of the Room Allocation service, told about cancellations.
 ROOMS_URL = os.environ.get("ROOMS_URL", "http://room-allocation:8000")
+
+# Seconds to wait for Room Allocation before giving up on a call.
+ROOMS_TIMEOUT_S = float(os.environ.get("ROOMS_TIMEOUT_S", "5"))
 
 app = Flask(__name__)
 
@@ -73,7 +76,7 @@ def release_room(conn, registration_id):
     """
     url = f"{ROOMS_URL}/registrations/{registration_id}/release"
     try:
-        urllib.request.urlopen(urllib.request.Request(url, method="POST"), timeout=5)
+        urllib.request.urlopen(urllib.request.Request(url, method="POST"), timeout=ROOMS_TIMEOUT_S)
     except urllib.error.URLError as error:
         raise ValueError("Room Allocation is unavailable, please try again") from error
 
@@ -94,8 +97,14 @@ def bad_request(error):
 
 @app.get("/health")
 def health():
-    """Report that the service is up. The database check is added with the database."""
-    return jsonify(status="ok", service="trip-management", version=VERSION)
+    """200 if this service can read and write its own database, 503 if not.
+
+    Only this service's own state counts: the other service being down
+    does not make this one unhealthy.
+    """
+    if check_health():
+        return jsonify(status="ok", db="ok", service="trip-management", version=VERSION)
+    return jsonify(status="error", db="unavailable", service="trip-management", version=VERSION), 503
 
 
 @app.get("/trips")
