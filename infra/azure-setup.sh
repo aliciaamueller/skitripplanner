@@ -37,11 +37,19 @@ echo "== Managed identity $IDENTITY, trusted only for runs on main of $REPO"
 az identity create --resource-group "$RG" --name "$IDENTITY" --output none
 CLIENT_ID=$(az identity show -g "$RG" -n "$IDENTITY" --query clientId -o tsv)
 PRINCIPAL_ID=$(az identity show -g "$RG" -n "$IDENTITY" --query principalId -o tsv)
-exists az identity federated-credential show -g "$RG" --identity-name "$IDENTITY" --name github-main ||
-  az identity federated-credential create -g "$RG" --identity-name "$IDENTITY" --name github-main \
-    --issuer https://token.actions.githubusercontent.com \
-    --subject "repo:$REPO:ref:refs/heads/main" \
+# GitHub's OIDC token names the repository with its owner's and its own
+# numeric IDs (repo:<owner>@<id>/<repo>@<id>:ref:refs/heads/main), so a
+# renamed or re-created repository with the same name cannot sign in.
+SUBJECT="repo:${REPO%%/*}@$(gh api "users/${REPO%%/*}" --jq .id)/${REPO#*/}@$(gh api "repos/$REPO" --jq .id):ref:refs/heads/main"
+if exists az identity federated-credential show -g "$RG" --identity-name "$IDENTITY" --name github-main; then
+  az identity federated-credential update -g "$RG" --identity-name "$IDENTITY" --name github-main \
+    --issuer https://token.actions.githubusercontent.com --subject "$SUBJECT" \
     --audiences api://AzureADTokenExchange --output none
+else
+  az identity federated-credential create -g "$RG" --identity-name "$IDENTITY" --name github-main \
+    --issuer https://token.actions.githubusercontent.com --subject "$SUBJECT" \
+    --audiences api://AzureADTokenExchange --output none
+fi
 RG_ID=$(az group show --name "$RG" --query id -o tsv)
 az role assignment create --assignee-object-id "$PRINCIPAL_ID" --assignee-principal-type ServicePrincipal \
   --role Contributor --scope "$RG_ID" --output none
