@@ -4,13 +4,15 @@ The domain logic lives in trip_management.py and trip_statistics.py. This
 file only turns HTTP requests into calls to them and their answers into JSON.
 """
 
+import logging
 import os
+import sys
 import urllib.error
 import urllib.request
 
 from flask import Flask, jsonify, request
 
-from db import init_db
+from db import migrate
 from trip_management import (
     cancel_registration,
     confirm_payment,
@@ -54,8 +56,12 @@ def allow_ui_origin(response):
     return response
 
 
-# Create any missing tables when the service starts. Safe to repeat.
-init_db()
+# Log lines (such as each migration applied) go to stdout with the access log.
+logging.basicConfig(stream=sys.stdout, level=logging.INFO,
+                    format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+
+# Bring the database schema up to date before serving any request.
+migrate()
 
 
 def release_room(conn, registration_id):

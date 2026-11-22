@@ -6,8 +6,9 @@ get_trip, get_registration and on_registration_cancelled) are the only way the r
 this domain. Callers never see the SQL, the transactions or the expiry
 rules. app.py exposes them as the endpoints of the Trip Management service.
 """
-import sqlite3
 from datetime import date, datetime, timedelta, timezone
+
+import pymssql
 
 from db import get_connection
 
@@ -65,10 +66,11 @@ def create_trip(name, destination, start_date, end_date, capacity):
     conn = get_connection()
 
     try:
-        cursor = conn.execute(
+        trip_id = conn.execute(
             """
             INSERT INTO trips
             (name, destination, start_date, end_date, capacity)
+            OUTPUT INSERTED.id
             VALUES (?, ?, ?, ?, ?)
             """,
             (
@@ -78,13 +80,23 @@ def create_trip(name, destination, start_date, end_date, capacity):
                 end.isoformat(),
                 capacity
             )
-        )
+        ).fetchone()["id"]
 
         conn.commit()
-        return cursor.lastrowid
+        return trip_id
 
     finally:
         conn.close()
+
+
+def _lock_trip(conn, trip_id):
+    """Lock a trip's row until the transaction ends.
+
+    Every change to a trip's registrations takes this lock first, so
+    changes to the same trip happen one at a time and never see each
+    other's half-finished work. Other trips are not blocked.
+    """
+    conn.execute("SELECT id FROM trips WITH (UPDLOCK, HOLDLOCK) WHERE id = ?", (trip_id,))
 
 
 def _promote_waitlist(conn, trip_id, now):
@@ -112,13 +124,12 @@ def _promote_waitlist(conn, trip_id, now):
     # id breaks ties if two students registered at the same moment.
     next_in_line = conn.execute(
         """
-        SELECT id
+        SELECT TOP (?) id
         FROM registrations
         WHERE trip_id = ? AND status = 'waitlisted'
         ORDER BY registered_at, id
-        LIMIT ?
         """,
-        (trip_id, free_places)
+        (free_places, trip_id)
     ).fetchall()
 
     # A promoted student gets a fresh payment window starting now.
@@ -170,12 +181,11 @@ def register_student(trip_id, name, email):
     conn = get_connection()
 
     try:
-        # Lock the database before checking capacity, so two students
-        # cannot both take the last place.
-        conn.execute("BEGIN IMMEDIATE")
-
+        # Lock this trip's row before checking capacity, so two students
+        # cannot both take the last place: a second registration for the
+        # same trip waits here until the first one commits.
         trip = conn.execute(
-            "SELECT capacity FROM trips WHERE id = ?",
+            "SELECT capacity FROM trips WITH (UPDLOCK, HOLDLOCK) WHERE id = ?",
             (trip_id,)
         ).fetchone()
 
@@ -204,10 +214,11 @@ def register_student(trip_id, name, email):
             status = "waitlisted"
             payment_deadline = None
 
-        cursor = conn.execute(
+        registration_id = conn.execute(
             """
             INSERT INTO registrations
             (trip_id, name, email, status, registered_at, payment_deadline)
+            OUTPUT INSERTED.id
             VALUES (?, ?, ?, ?, ?, ?)
             """,
             (
@@ -218,12 +229,12 @@ def register_student(trip_id, name, email):
                 now.isoformat(),
                 payment_deadline
             )
-        )
+        ).fetchone()["id"]
 
         conn.commit()
-        return cursor.lastrowid
+        return registration_id
 
-    except sqlite3.IntegrityError as error:
+    except pymssql.IntegrityError as error:
         conn.rollback()
         raise ValueError("Student already registered for this trip") from error
 
@@ -241,8 +252,6 @@ def confirm_payment(registration_id):
     conn = get_connection()
 
     try:
-        conn.execute("BEGIN IMMEDIATE")
-
         registration = conn.execute(
             "SELECT trip_id FROM registrations WHERE id = ?",
             (registration_id,)
@@ -250,6 +259,8 @@ def confirm_payment(registration_id):
 
         if registration is None:
             raise ValueError("Registration not found")
+
+        _lock_trip(conn, registration["trip_id"])
 
         # Expire first, so a late payment finds its place already released.
         _release_expired(conn, registration["trip_id"], _now())
@@ -290,8 +301,6 @@ def cancel_registration(registration_id):
     conn = get_connection()
 
     try:
-        conn.execute("BEGIN IMMEDIATE")
-
         registration = conn.execute(
             "SELECT trip_id, status FROM registrations WHERE id = ?",
             (registration_id,)
@@ -299,6 +308,8 @@ def cancel_registration(registration_id):
 
         if registration is None:
             raise ValueError("Registration not found")
+
+        _lock_trip(conn, registration["trip_id"])
 
         if registration["status"] == "cancelled":
             raise ValueError("Registration is already cancelled")

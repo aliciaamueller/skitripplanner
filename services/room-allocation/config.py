@@ -5,11 +5,10 @@ import os
 # Port the web server listens on.
 PORT = int(os.environ.get("PORT", "8000"))
 
-# Folder that holds this service's SQLite database file.
-DATA_DIR = os.environ.get("DATA_DIR", "./data")
-
-# Full path to the database file inside DATA_DIR.
-DB_PATH = os.path.join(DATA_DIR, "rooms.db")
+# Connection string of this service's own SQL Server database, e.g.
+# mssql://rooms_app:<password>@sqlserver:1433/rooms. It holds a password, so it
+# has no default: compose sets it locally, the pipeline on Azure.
+DATABASE_URL = os.environ.get("DATABASE_URL")
 
 # Base URL of the Trip Management service. Room Allocation asks it about
 # trips and registrations over HTTP instead of reading its tables.

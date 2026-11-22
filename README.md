@@ -57,11 +57,11 @@ The two domains from Assignment 1 now run as separate services. The UI is static
    Trip Management  <------  Room Allocation
      (Flask, 8001)    HTTP     (Flask, 8002)
           |          ------>          |
-       trips.db      release       rooms.db
+  trips database    release   rooms database
    trips, registrations       rooms, room_assignments,
                               roommate_preferences
 
-   SQL Server + db-init (being introduced, see below)
+   both databases: one SQL Server (compose) / Azure SQL serverless (cloud)
 ```
 
 **Trip Management** owns `trips` and `registrations`: capacity, payments, cancellations and waiting-list order.
@@ -74,12 +74,11 @@ The two domains from Assignment 1 now run as separate services. The UI is static
 
 ### Databases
 
-Each service still writes its own SQLite file (`trips.db`, `rooms.db`) to a Docker volume, so their data is already separate. The move to SQL Server has started:
+Each service has its own SQL Server database and its own login, and neither login can open the other database:
 
-- Compose runs a `sqlserver` container and a one-shot `db-init` job. It runs `db/init.sql`, which creates a `trips` and a `rooms` database and one login per service (`trips_app`, `rooms_app`). Each login is a user in its own database only, so neither service can read the other's data. The script only creates what is missing, so it is safe on every start.
-- The tables are defined by each service's migrations: `services/trip-management/migrations/001_init.sql` and `services/room-allocation/migrations/001_init.sql`.
-
-The services will apply their own migrations at startup once they are switched over to SQL Server, which is the next step.
+- **Locally**, compose runs one `sqlserver` container and a one-shot `db-init` job. `db-init` runs `db/init.sql`, which creates the `trips` and `rooms` databases and the logins `trips_app` and `rooms_app`, each a user in its own database only. The script only creates what is missing, so it runs on every start.
+- **Tables** are created by each service's **migrations**: numbered SQL files in `services/<service>/migrations/` (`001_init.sql`, ...). At startup, before serving requests, `db.migrate()` applies every file not yet recorded in the `schema_migrations` table, in order, each in its own transaction with its record. A second start applies nothing (the log says `0 migration(s) applied now`). Applied files are never edited; changes go in a new file.
+- **Connections** come from `DATABASE_URL`. A failed connect is retried with a growing wait (1 s, 2 s, 4 s, ...), longer at startup, because the Azure serverless database pauses when idle and takes up to about a minute to resume.
 
 Design choices and alternatives are explained in [ADR.md](ADR.md).
 
@@ -98,37 +97,39 @@ docker compose up --build
 
 Open **http://localhost:8080**. Each service is also reachable directly: Trip Management on **http://localhost:8001**, Room Allocation on **http://localhost:8002**.
 
-`.env` is ignored by Git, so the database passwords are never committed. Compose stops with a clear message if one is missing. Data lives in named volumes (`trips-data`, `rooms-data`, `sqlserver-data`) and survives `docker compose down`; `docker compose down -v` deletes it.
+`.env` is ignored by Git, so the database passwords are never committed. Compose stops with a clear message if one is missing. Both databases live in the `sqlserver-data` volume and survive `docker compose down`; `docker compose down -v` deletes them.
 
 ### Run a service directly
 
-Each service has its own `requirements.txt` and starts with `python app.py`. For example, both services side by side:
+Each service has its own `requirements.txt` and starts with `python app.py`. It needs a SQL Server with its database and login, for example the compose one: `docker compose up -d db-init` starts SQL Server, creates both databases and logins, and exits. Then, with the passwords from your `.env`:
 
 ```bash
 cd services/trip-management
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-PORT=8001 ROOMS_URL=http://localhost:8002 python app.py
+PORT=8001 ROOMS_URL=http://localhost:8002 \
+  DATABASE_URL='mssql://trips_app:<TRIPS_DB_PASSWORD>@localhost:1433/trips' python app.py
 ```
 
 ```bash
 cd services/room-allocation
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-PORT=8002 TRIPS_URL=http://localhost:8001 python app.py
+PORT=8002 TRIPS_URL=http://localhost:8001 \
+  DATABASE_URL='mssql://rooms_app:<ROOMS_DB_PASSWORD>@localhost:1433/rooms' python app.py
 ```
 
-Each service creates its tables on startup and keeps existing data. To use the UI with services started this way, serve the `ui/` folder on port 8080 (for example `python3 -m http.server 8080 -d ui`), so its origin matches the default `CORS_ORIGIN`.
+Each service applies its pending migrations on startup and keeps existing data. To use the UI with services started this way, serve the `ui/` folder on port 8080 (for example `python3 -m http.server 8080 -d ui`), so its origin matches the default `CORS_ORIGIN`.
 
 ### Configuration
 
 | Service | Variable | Default | Description |
 |---|---|---|---|
 | Trip Management | `PORT` | `8000` | Port the service listens on |
-| Trip Management | `DATA_DIR` | `./data` (`/data` in the image) | Folder for `trips.db` |
+| Trip Management | `DATABASE_URL` | none (secret) | `mssql://trips_app:<password>@<host>:1433/trips`; characters like `@` `/` `:` in the password must be percent-encoded |
 | Trip Management | `ROOMS_URL` | `http://room-allocation:8000` | Room Allocation, called when a registration is cancelled |
 | Room Allocation | `PORT` | `8000` | Port the service listens on |
-| Room Allocation | `DATA_DIR` | `./data` (`/data` in the image) | Folder for `rooms.db` |
+| Room Allocation | `DATABASE_URL` | none (secret) | `mssql://rooms_app:<password>@<host>:1433/rooms` |
 | Room Allocation | `TRIPS_URL` | `http://trip-management:8000` | Trip Management, asked about trips and registrations |
 | Both services | `CORS_ORIGIN` | `http://localhost:8080` | The only origin browsers may call the service from (the UI) |
 | Both services | `GIT_SHA` | `dev` | Version reported by `/health` |
@@ -137,42 +138,43 @@ Each service creates its tables on startup and keeps existing data. To use the U
 | db-init | `TRIPS_DB_PASSWORD` | none, set in `.env` | Password of the `trips_app` login |
 | db-init | `ROOMS_DB_PASSWORD` | none, set in `.env` | Password of the `rooms_app` login |
 
-**Database paths:** `$DATA_DIR/trips.db` and `$DATA_DIR/rooms.db`, which is `/data/...` inside each container, on that service's volume.
-
 Both services answer `GET /health` with HTTP 200, so the cloud can check that they are alive.
 
 ## 4. Testing and reliability
 
-Each service has its own tests, using **pytest** and **pytest-cov**. They run against temporary SQLite files, so they never touch real data. Room Allocation's tests replace the HTTP calls to Trip Management with an in-memory fake, so they test room rules without a running service.
+Each service has its own tests, using **pytest** and **pytest-cov**. They run against a real SQL Server, but never against the service's own database: at the start, `tests/conftest.py` creates a throwaway `trips_test` or `rooms_test` database, applies the migrations to it with the real runner, and empties its tables before every test. Room Allocation's tests replace the HTTP calls to Trip Management with an in-memory fake, so they test room rules without a running service.
 
-Run one service's tests with coverage (from inside `services/trip-management` or `services/room-allocation`):
+The tests find SQL Server through `TEST_DATABASE_URL`, an administrator login that may create databases. With the compose SQL Server running (`docker compose up -d sqlserver`, published on `127.0.0.1:1433` only), run one service's tests with coverage from inside `services/trip-management` or `services/room-allocation`:
 
 ```bash
 pip install -r requirements.txt pytest pytest-cov
+export TEST_DATABASE_URL='mssql://sa:<MSSQL_SA_PASSWORD>@localhost:1433/master'
 python -m pytest --cov=. --cov-report=term-missing
 ```
 
-### Recorded test results (2026-11-21)
+### Recorded test results (2026-11-22, against SQL Server)
 
-**Trip Management: 47 tests. Room Allocation: 33 tests.** Business-logic coverage:
+**Trip Management: 53 tests. Room Allocation: 38 tests.** Coverage of the business logic and the database code:
 
 ```text
 Name                 Stmts   Miss  Cover
 ----------------------------------------
-trip_management.py     150      0   100%
+trip_management.py     151      0   100%
 trip_statistics.py      14      0   100%
-room_allocation.py     141      6    96%
+room_allocation.py     138      6    96%
+db.py (trips)           91      6    93%
+db.py (rooms)           91     13    86%
 ```
 
 Line coverage is not proof that every combination of rules is tested; the testing priorities are explained in ADR 4.
 
 ### Continuous integration
 
-`.github/workflows/ci.yml` runs on every push. The `test` job runs ruff and pytest for each service. The `images` job only starts if the tests pass; it builds the two service images and, on `main` only, pushes them to GitHub Container Registry tagged with the commit SHA.
+`.github/workflows/ci.yml` runs on every push. The `test` job runs ruff and pytest for each service. Before pytest it starts a throwaway SQL Server container in the job, with a random password made in that step and masked in the log, so no password is stored and CI never touches Azure SQL. The `images` job only starts if the tests pass; it builds the two service images and, on `main` only, pushes them to GitHub Container Registry tagged with the commit SHA.
 
 ### Preventing overbooking
 
-One test starts **10 simultaneous registrations for a trip with only 2 available places**. The expected result is two reserved places and eight waitlisted students. `register_student` opens a `BEGIN IMMEDIATE` transaction before checking capacity, so simultaneous requests cannot reserve the same last places. Time-dependent tests use `monkeypatch` to simulate payment deadlines without waiting 48 hours.
+One test starts **10 simultaneous registrations for a trip with only 2 available places**. The expected result is two reserved places and eight waitlisted students. Before checking capacity, every change to a trip's registrations locks that trip's row (`SELECT ... WITH (UPDLOCK, HOLDLOCK)`), so a second request for the same trip waits until the first commits, and requests for other trips are not blocked. `assign_student` locks the room's row the same way, so two students cannot both take a room's last bed. Time-dependent tests use `monkeypatch` to simulate payment deadlines without waiting 48 hours.
 
 ### Assignment 1 container check
 
@@ -193,7 +195,7 @@ The professor's `container/run.sh` checks the single-container app from Assignme
 
 A few decisions were particularly important during development.
 
-**Keeping the implementation simple.** Flask and Python's built-in `sqlite3` module were sufficient for this project's scope, and the services call each other with the standard library's `urllib`, so the split added no new dependency. Using direct SQL also makes the database constraints and queries easier to follow.
+**Keeping the implementation simple.** Flask, plain SQL and one database driver (`pymssql`) are enough for this project's scope, and the services call each other with the standard library's `urllib`. `db.py` wraps `pymssql` in a small `Connection` with the same `execute(sql, params)` and `row["column"]` interface the SQLite code used, so the move to SQL Server changed the SQL dialect but not the shape of the domain code. Using direct SQL also makes the database constraints and queries easier to follow.
 
 **Preserving registration history.** Cancelled registrations are retained instead of deleted. A partial unique index prevents duplicate active registrations while allowing students to register again after cancelling.
 
@@ -216,7 +218,7 @@ skitripplanner/
 │   │   ├── app.py            HTTP endpoints, calls Room Allocation on cancel
 │   │   ├── trip_management.py  trips, registrations, payments, waiting list
 │   │   ├── trip_statistics.py  numbers for the organiser overview
-│   │   ├── config.py, db.py, schema.sql
+│   │   ├── config.py, db.py  settings; connections and the migration runner
 │   │   ├── migrations/       SQL Server schema, one numbered file per change
 │   │   ├── tests/
 │   │   ├── requirements.txt, pytest.ini
@@ -224,7 +226,7 @@ skitripplanner/
 │   └── room-allocation/      Room Allocation service
 │       ├── app.py            HTTP endpoints
 │       ├── room_allocation.py  rooms, assignments, roommate preferences
-│       ├── config.py, db.py, schema.sql
+│       ├── config.py, db.py
 │       ├── migrations/
 │       ├── tests/
 │       ├── requirements.txt, pytest.ini
