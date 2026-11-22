@@ -323,10 +323,18 @@ button.danger:hover {
 }
 
 .message {
-    padding: 12px 16px;
-    border-radius: 12px;
-    margin-bottom: 20px;
+    position: fixed;
+    left: 50%;
+    bottom: 24px;
+    transform: translateX(-50%);
+    z-index: 50;
+    width: max-content;
+    max-width: calc(100% - 32px);
+    padding: 14px 20px;
+    border-radius: 14px;
     font-weight: 600;
+    box-shadow: 0 12px 32px rgba(31, 45, 61, 0.18);
+    cursor: pointer;
 }
 
 .message.success { background: #e3f1ec; color: var(--pine); }
@@ -346,6 +354,13 @@ button.danger:hover {
 
 .trip-card:hover {
     transform: translateY(-3px);
+}
+
+.trip-card .go {
+    display: inline-block;
+    margin-top: 6px;
+    font-weight: 700;
+    color: var(--goggles);
 }
 
 .trip-card .dates {
@@ -611,3 +626,67 @@ tr:last-child td {
         gap: 24px;
     }
 }
+
+/* ---------- Trip page helpers ---------- */
+
+/* Jump links under the trip's numbers. */
+.jump {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 4px 0 8px;
+}
+
+.jump a {
+    padding: 8px 14px;
+    border-radius: 99px;
+    background: var(--snow);
+    box-shadow: var(--shadow);
+    color: var(--ink);
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.jump a:hover { color: var(--goggles); }
+
+/* Small grey line under a status, e.g. the payment deadline. */
+.hint {
+    display: block;
+    margin-top: 4px;
+    font-size: 12px;
+    color: var(--muted);
+}
+
+/* The room picker inside the registrations table. */
+select.inline {
+    width: auto;
+    padding: 6px 10px;
+    font-size: 13px;
+}
+
+/* Who sleeps in a room. */
+.occupants {
+    margin: 12px 0 0;
+    padding: 0;
+    list-style: none;
+    font-size: 14px;
+}
+
+.occupants li { padding: 3px 0; }
+.occupants .free { color: var(--muted); }
+
+form.inline-form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: flex-end;
+}
+
+form.inline-form label { flex: 1 1 180px; }
+
+.request-list { margin: 0 0 16px; padding: 0; list-style: none; }
+.request-list li { padding: 6px 0; border-bottom: 1px solid var(--line); }
+.request-list li:last-child { border-bottom: none; }
+
+.jump { margin-bottom: 28px; }
+#rooms + .panel { margin-top: 20px; }

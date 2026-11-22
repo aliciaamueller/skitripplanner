@@ -41,7 +41,13 @@
 
         <section class="stats" id="stats"></section>
 
-        <section class="section">
+        <nav class="jump" aria-label="On this page">
+            <a href="#registrations-section">Registrations</a>
+            <a href="#rooms-section">Rooms</a>
+            <a href="#requests-section">Roommate requests</a>
+        </nav>
+
+        <section class="section" id="registrations-section">
             <div class="section-heading">
                 <h2>Registrations</h2>
                 <span class="muted" id="registration-count"></span>
@@ -49,7 +55,7 @@
             <div class="table-wrap">
                 <table>
                     <thead>
-                        <tr><th>No.</th><th>Student</th><th>Email</th><th>Status</th><th>Room</th><th></th></tr>
+                        <tr><th>No.</th><th>Student</th><th>Email</th><th>Status</th><th>Room</th><th>Actions</th></tr>
                     </thead>
                     <tbody id="registrations"></tbody>
                 </table>
@@ -57,7 +63,7 @@
             <div class="panel">
                 <h3>Register a student</h3>
                 <p class="muted">A free place is held for 48 hours until they pay. When the trip is full they join the waiting list, first come first served. Give them their number so they can open “My trip”.</p>
-                <form id="register">
+                <form id="register" class="inline-form">
                     <label>Name <input name="name" placeholder="Sofia García" required></label>
                     <label>Email <input type="email" name="email" placeholder="sofia@example.com" required></label>
                     <button type="submit">Register</button>
@@ -65,41 +71,34 @@
             </div>
         </section>
 
-        <section class="section">
+        <section class="section" id="rooms-section">
             <div class="section-heading">
                 <h2>Rooms</h2>
                 <span class="muted" id="need-room"></span>
             </div>
+            <p class="muted">To put a paid student in a room, pick the room in their row of the registrations table.</p>
             <div class="grid" id="rooms"></div>
-            <div class="two-columns">
-                <div class="panel">
-                    <h3>Add a room</h3>
-                    <form id="create-room" class="stacked">
-                        <label>Room name <input name="name" placeholder="Room 101" required></label>
-                        <label>Beds (1–6) <input type="number" name="capacity" min="1" max="6" placeholder="4" required></label>
-                        <button type="submit">Add room</button>
-                    </form>
-                </div>
-                <div class="panel">
-                    <h3>Put a student in a room</h3>
-                    <form id="assign" class="stacked">
-                        <label>Paid student without a room <select name="registration_id" id="unassigned" required></select></label>
-                        <label>Room <select name="room_id" id="free-rooms" required></select></label>
-                        <button type="submit">Assign</button>
-                    </form>
-                </div>
+            <div class="panel">
+                <h3>Add a room</h3>
+                <form id="create-room" class="inline-form">
+                    <label>Room name <input name="name" placeholder="Room 101" required></label>
+                    <label>Beds (1–6) <input type="number" name="capacity" min="1" max="6" placeholder="4" required></label>
+                    <button type="submit">Add room</button>
+                </form>
             </div>
         </section>
 
-        <section class="section">
+        <section class="section" id="requests-section">
             <h2>Roommate requests</h2>
             <div class="panel">
-                <form id="preference">
+                <ul class="request-list" id="preferences"></ul>
+                <h3>Add a request</h3>
+                <p class="muted">Both students must have paid.</p>
+                <form id="preference" class="inline-form">
                     <label>Student <select name="registration_id" class="confirmed-students" required></select></label>
-                    <label>Would like to share with <select name="preferred_registration_id" class="confirmed-students" required></select></label>
+                    <label>Wants to share with <select name="preferred_registration_id" class="confirmed-students" required></select></label>
                     <button type="submit">Save request</button>
                 </form>
-                <div id="preferences"></div>
             </div>
         </section>
     </main>

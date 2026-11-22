@@ -58,12 +58,29 @@ function onSubmit(form, action) {
     });
 }
 
+// A message floats at the bottom of the screen, so the page does not jump
+// away from what you were doing. Successes fade after a few seconds;
+// errors stay until you click them away.
+let messageTimer;
+
 function showMessage(text, kind) {
     const box = document.getElementById("message");
     box.textContent = text;
     box.className = `message ${kind}`;
+    box.title = "Click to close";
     box.hidden = false;
-    box.scrollIntoView({ behavior: "smooth", block: "center" });
+    box.onclick = () => { box.hidden = true; };
+    clearTimeout(messageTimer);
+    if (kind === "success") {
+        messageTimer = setTimeout(() => { box.hidden = true; }, 4000);
+    }
+}
+
+// "2026-11-24T14:49:11+00:00" becomes "Tue 24 Nov, 15:49" in the viewer's time.
+function formatDateTime(value) {
+    return new Date(value).toLocaleString("en-GB", {
+        weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
+    });
 }
 
 // Names and emails come from users, so escape them before putting them in HTML.

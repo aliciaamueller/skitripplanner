@@ -19,9 +19,16 @@ async function showTrips() {
                 ${trip.stats.places_remaining} of ${trip.capacity} places free ·
                 ${trip.stats.waitlisted} waiting
             </p>
+            <span class="go">Manage trip →</span>
         </a>
     `).join("");
 }
+
+// The end date picker starts at the chosen start date.
+const form = document.getElementById("create-trip");
+form.start_date.addEventListener("change", () => {
+    form.end_date.min = form.start_date.value;
+});
 
 onSubmit(document.getElementById("create-trip"), async (values) => {
     await api(`${TRIPS}/trips`, { ...values, capacity: Number(values.capacity) });
