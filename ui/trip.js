@@ -33,9 +33,11 @@ async function showTrip() {
     document.getElementById("trip-where").textContent =
         `${trip.destination} · ${formatDates(trip.start_date, trip.end_date)}`;
 
+    const freeRooms = rooms.filter((room) => room.occupied < room.capacity);
+
     showStats(trip.stats, confirmed.length - withoutRoom.length, withoutRoom.length);
-    showRegistrations(registrations, roomOf);
-    showRooms(rooms, withoutRoom);
+    showRegistrations(registrations, roomOf, freeRooms, roomResults !== null);
+    showRooms(rooms, withoutRoom, assignments, names);
     showPreferences(confirmed, preferences, names);
 }
 
@@ -52,7 +54,31 @@ function showStats(stats, roomed, needRoom) {
         stat("Need a room", needRoom);
 }
 
-function showRegistrations(registrations, roomOf) {
+// What the Room column shows: the room, a picker for a paid student without
+// one, or a short reason why there is nothing to pick.
+function roomCell(registration, roomOf, freeRooms, roomsAvailable) {
+    if (roomOf[registration.id]) {
+        return escapeHtml(roomOf[registration.id]);
+    }
+    if (registration.status !== "confirmed" || !roomsAvailable) {
+        return `<span class="muted">—</span>`;
+    }
+    if (freeRooms.length === 0) {
+        return `<span class="muted">No free beds, add a room</span>`;
+    }
+    return `<select class="inline" aria-label="Room for ${escapeHtml(registration.name)}"
+                    onchange="assignRoom(this.value, ${registration.id})">
+        <option value="">Choose a room…</option>
+        ${freeRooms.map((room) => `<option value="${room.id}">${escapeHtml(room.name)}
+            (${room.capacity - room.occupied} free)</option>`).join("")}
+    </select>`;
+}
+
+// Names by registration number, for the messages after Mark paid and Cancel.
+let nameOf = {};
+
+function showRegistrations(registrations, roomOf, freeRooms, roomsAvailable) {
+    nameOf = Object.fromEntries(registrations.map((r) => [r.id, r.name]));
     document.getElementById("registration-count").textContent =
         plural(registrations.length, "registration");
 
@@ -67,41 +93,45 @@ function showRegistrations(registrations, roomOf) {
             <td class="muted">#${r.id}</td>
             <td><strong>${escapeHtml(r.name)}</strong></td>
             <td>${escapeHtml(r.email)}</td>
-            <td><span class="pill ${r.status}">${statusLabel(r.status)}</span></td>
-            <td>${escapeHtml(roomOf[r.id] || "—")}</td>
+            <td>
+                <span class="pill ${r.status}">${statusLabel(r.status)}</span>
+                ${r.status === "pending_payment" && r.payment_deadline
+                    ? `<span class="hint">Pay by ${formatDateTime(r.payment_deadline)}</span>` : ""}
+            </td>
+            <td>${roomCell(r, roomOf, freeRooms, roomsAvailable)}</td>
             <td class="actions"><div>
                 ${r.status === "pending_payment"
-                    ? `<button class="small" onclick="act('payment', ${r.id}, 'Payment confirmed.')">Paid</button>` : ""}
+                    ? `<button class="small" onclick="act('payment', ${r.id}, 'Payment recorded for ')">Mark paid</button>` : ""}
                 ${r.status !== "cancelled"
-                    ? `<button class="small danger" onclick="act('cancel', ${r.id}, 'Registration cancelled.')">Cancel</button>` : ""}
+                    ? `<button class="small danger" onclick="cancelRegistration(${r.id})">Cancel</button>` : ""}
             </div></td>
         </tr>
     `).join("");
 }
 
-function showRooms(rooms, withoutRoom) {
-    document.getElementById("need-room").textContent =
-        `${plural(withoutRoom.length, "paid student")} still without a room`;
+function showRooms(rooms, withoutRoom, assignments, names) {
+    document.getElementById("need-room").textContent = withoutRoom.length === 0
+        ? "Every paid student has a room"
+        : `${plural(withoutRoom.length, "paid student")} still without a room`;
 
     document.getElementById("rooms").innerHTML = rooms.length === 0
         ? `<div class="empty">No rooms yet. Add the first one below.</div>`
-        : rooms.map((room) => `
+        : rooms.map((room) => {
+            const sleepers = assignments.filter((a) => a.room_id === room.id);
+            const freeBeds = room.capacity - sleepers.length;
+            return `
             <div class="panel">
                 <div class="section-heading">
                     <h3>${escapeHtml(room.name)}</h3>
                     <span class="pill confirmed">${room.occupied}/${room.capacity} beds</span>
                 </div>
                 <div class="bar"><div style="width: ${room.occupied / room.capacity * 100}%"></div></div>
-            </div>
-        `).join("");
-
-    fillSelect(document.getElementById("unassigned"), withoutRoom, "Choose a student");
-    fillSelect(
-        document.getElementById("free-rooms"),
-        rooms.filter((room) => room.occupied < room.capacity)
-             .map((room) => ({ id: room.id, name: `${room.name} (${room.capacity - room.occupied} free)` })),
-        "Choose a room",
-    );
+                <ul class="occupants">
+                    ${sleepers.map((a) => `<li>🛏 ${escapeHtml(names[a.registration_id] || `#${a.registration_id}`)}</li>`).join("")}
+                    ${freeBeds > 0 ? `<li class="free">${plural(freeBeds, "free bed")}</li>` : ""}
+                </ul>
+            </div>`;
+        }).join("");
 }
 
 function showPreferences(confirmed, preferences, names) {
@@ -109,10 +139,12 @@ function showPreferences(confirmed, preferences, names) {
         fillSelect(select, confirmed, "Choose a student");
     }
 
-    document.getElementById("preferences").innerHTML = preferences.map((p) => `
-        <p><strong>${escapeHtml(names[p.registration_id])}</strong> would like to share with
-           <strong>${escapeHtml(names[p.preferred_registration_id])}</strong></p>
-    `).join("");
+    document.getElementById("preferences").innerHTML = preferences.length === 0
+        ? `<li class="muted">No requests yet.</li>`
+        : preferences.map((p) => `
+            <li><strong>${escapeHtml(names[p.registration_id])}</strong> wants to share with
+                <strong>${escapeHtml(names[p.preferred_registration_id])}</strong></li>
+        `).join("");
 }
 
 function fillSelect(select, items, placeholder) {
@@ -121,12 +153,37 @@ function fillSelect(select, items, placeholder) {
     ).join("");
 }
 
-// The Paid and Cancel buttons in the table.
+// The "Mark paid" and "Cancel" buttons in the table.
 async function act(action, registrationId, success) {
+    const name = nameOf[registrationId];
     try {
         await api(`${TRIPS}/registrations/${registrationId}/${action}`, {});
         await showTrip();
-        showMessage(success, "success");
+        showMessage(`${success}${name}.`, "success");
+    } catch (error) {
+        showMessage(error.message, "error");
+    }
+}
+
+// Cancelling cannot be undone, so ask first.
+function cancelRegistration(registrationId) {
+    const sure = confirm(`Cancel ${nameOf[registrationId]}'s registration?\n\n`
+        + "Their place goes to the next person on the waiting list and their bed is freed. "
+        + "This cannot be undone.");
+    if (sure) {
+        act("cancel", registrationId, "Registration cancelled for ");
+    }
+}
+
+// Picking a room in a student's row assigns them straight away.
+async function assignRoom(roomId, registrationId) {
+    if (!roomId) {
+        return;
+    }
+    try {
+        await api(`${ROOMS}/rooms/${roomId}/assignments`, { registration_id: registrationId });
+        await showTrip();
+        showMessage("Room assigned.", "success");
     } catch (error) {
         showMessage(error.message, "error");
     }
@@ -142,13 +199,6 @@ onSubmit(document.getElementById("create-room"), async (values) => {
     await api(`${ROOMS}/trips/${tripId}/rooms`, { ...values, capacity: Number(values.capacity) });
     await showTrip();
     return `${values.name} added.`;
-});
-
-onSubmit(document.getElementById("assign"), async (values) => {
-    await api(`${ROOMS}/rooms/${values.room_id}/assignments`,
-              { registration_id: Number(values.registration_id) });
-    await showTrip();
-    return "Student assigned to the room.";
 });
 
 onSubmit(document.getElementById("preference"), async (values) => {
